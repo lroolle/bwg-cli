@@ -1,0 +1,6 @@
+/bwg
+/dist/
+/completions/
+cover.out
+*.test
+.env

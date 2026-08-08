@@ -1,0 +1,54 @@
+# bwg-cli
+
+> BandwagonHost / KiwiVM VPS fleet control for humans and AI agents. Sweeps every VPS in one concurrent pass to answer the question the account actually raises: which box is close to its monthly bandwidth cap, and is anything suspended.
+
+`bwg` speaks JSON on every command (`--json`, `--jq`), sends data to stdout and diagnostics to stderr, returns errors that name the fix, and uses exit codes an agent can branch on (0 ok, 1 error, 2 config, 3 refused, 4 auth).
+
+Its distinguishing property is that read-only is a client capability, not a CLI flag: every KiwiVM endpoint is classified `read`/`write`/`destructive` in one registry, and the gate sits in the SDK in front of the HTTP client, so the CLI, the MCP server and any Go consumer inherit it.
+
+## Start here
+
+- [README](README.md): install, quick start, the safety model, configuration
+- [SKILL.md](skills/bwg-cli/SKILL.md): the operational contract for agents — command tree, JSON shapes, exit codes, recipes, and the things that will bite you
+- [SECURITY.md](SECURITY.md): what is stored where, credential handling, how to verify the read-only guarantee
+
+## Getting started
+
+bwg needs two values per VPS, both from the **KiwiVM control panel** (kiwivm.64clouds.com):
+
+- **VEID** — the VPS ID number, visible in the panel URL after `?veid=`
+- **API key** — the per-VPS secret under the **API** tab (looks like `private_xxxxxxxx`)
+
+There is no account-level API — every call needs the pair for one specific VPS.
+
+```bash
+export BWG_VEID=1347645
+export BWG_KIWIVM_API_KEY=private_xxxxxxxx
+bwg --read-only info
+```
+
+## Using it as an agent
+
+- Default to `--read-only` unless the task is explicitly to change something
+- Use `--dry-run` to preview any write before committing — it validates and shows the consent card without calling the API; with `--json` it emits `{"dryRun":true, ...}`
+- `bwg api ops` prints the risk classification of every endpoint — the same table the gate reads
+- Writes refuse rather than block when there is no terminal; pass `--yes` deliberately
+- `bwg api call <endpoint>` reaches endpoints without a dedicated command, still gated
+- `bwg update --check` to see if a newer version is available; `bwg update` to install it
+- MCP: `claude mcp add bwg -- bwg mcp --read-only`. In read-only mode mutating tools are not advertised at all
+
+## Status correlation
+
+- `bwg incidents` reads BandwagonHost's status page (bwhstatus.com Atom feed) and matches each incident against the configured fleet by node group ("nodes v31xx") and location ("Osaka"), printing why it matched
+- The matching is a heuristic over prose: a match is a prompt to investigate, and no match is not an all-clear. Both the CLI and the MCP tool say so in their output
+- [bwhstatus](bwhstatus/): the standalone Go client for the feed, credential-free and read-only by construction
+
+## The SDK
+
+- [kiwivm](kiwivm/): a Go client for the KiwiVM REST API. Covers every documented endpoint, absorbs the API's PHP-shaped JSON (numbers as strings, booleans as "0"/"1", empty objects as `[]`), and gets the bandwidth multiplier right
+- `kiwivm.New(veid, key, kiwivm.ReadOnly())` returns a client that refuses mutations before any HTTP request
+
+## Health
+
+- [LICENSE](LICENSE): MIT
+- Unofficial. Uses BandwagonHost's public KiwiVM REST API; not affiliated with BandwagonHost or 64clouds.

@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: gofmt
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build ./...
+
+  # The safety model is the product. If the read-only gate regresses,
+  # the build fails loudly rather than quietly shipping.
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: read-only gate
+        run: |
+          go test ./kiwivm/ -run 'ReadOnly|Gate|Raw' -v
+          go test ./internal/cli/ -run 'ReadOnly|Confirm|Catastrophic|Destructive' -v
+          go test ./internal/mcp/ -run 'ReadOnly' -v
