@@ -19,8 +19,12 @@ import (
 
 const maxBody = 4 << 20 // 4 MiB is plenty for a release JSON
 
+// repoSlug is where releases come from, named once so error messages
+// and the release URL cannot drift apart.
+const repoSlug = "lroolle/bwg-cli"
+
 // releaseURL is a var so tests can point it at httptest.
-var releaseURL = "https://api.github.com/repos/lroolle/bwg-cli/releases/latest"
+var releaseURL = "https://api.github.com/repos/" + repoSlug + "/releases/latest"
 
 // setReleaseURL overrides the GitHub API URL. Test-only.
 func setReleaseURL(u string) { releaseURL = u }
@@ -65,6 +69,17 @@ func CheckLatest(ctx context.Context, current string) (*Release, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// GitHub allows 60 unauthenticated API requests an hour per IP.
+		// Behind a shared NAT or a VPN exit that budget is often spent by
+		// someone else entirely, and "GitHub API returned 403" reads as a
+		// broken install rather than as a busy network.
+		if rateLimited(resp) {
+			return nil, fmt.Errorf(
+				"updater: GitHub's API rate limit is spent for this network "+
+					"(60 requests an hour per IP, unauthenticated)\n\n"+
+					"  Nothing is wrong with your install. Try again later, or take the\n"+
+					"  binary from https://github.com/%s/releases/latest", repoSlug)
+		}
 		return nil, fmt.Errorf("updater: GitHub API returned %d", resp.StatusCode)
 	}
 
@@ -297,6 +312,18 @@ func writeTemp(r io.Reader, mode os.FileMode) (string, error) {
 		return "", fmt.Errorf("updater: close temp: %w", err)
 	}
 	return out.Name(), nil
+}
+
+// rateLimited reports whether a refusal is GitHub's hourly budget
+// rather than a genuine forbidden. GitHub sends x-ratelimit-remaining:
+// 0 with the 403 (and 429 on some paths), which is the only way to tell
+// the two apart without parsing prose.
+func rateLimited(resp *http.Response) bool {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	return resp.StatusCode == http.StatusForbidden &&
+		resp.Header.Get("X-RateLimit-Remaining") == "0"
 }
 
 // stripV removes a leading "v" from a version string.

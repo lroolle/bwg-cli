@@ -8,7 +8,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **`install.sh` failed behind a shared IP.** It resolved the latest tag
+  through `api.github.com`, which allows 60 unauthenticated requests an
+  hour per IP — a budget a NAT, a VPN exit or a CI runner has often
+  already spent. The one-liner died at its first step with "could not
+  determine the latest release". It now reads the tag from the redirect
+  on `/releases/latest`, which is not rate limited, falls back to the
+  API, and accepts `BWG_VERSION=v0.2.0` to pin a version outright.
+- **`bwg update` blamed your install for GitHub's rate limit.** A 403
+  with `x-ratelimit-remaining: 0` now says what it is and where to get
+  the binary meanwhile, instead of "GitHub API returned 403".
 
 ## [0.2.0] - 2026-08-14
 

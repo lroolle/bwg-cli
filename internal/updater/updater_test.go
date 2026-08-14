@@ -444,3 +444,50 @@ func buildZip(t *testing.T, name, content string) []byte {
 	}
 	return buf.Bytes()
 }
+
+// A shared NAT or a VPN exit burns GitHub's 60-an-hour unauthenticated
+// budget without the user doing anything, and "GitHub API returned 403"
+// reads as a broken install. The error has to say what it actually is.
+func TestRateLimitSaysSoRatherThanBlamingTheInstall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"message":"API rate limit exceeded for 203.0.113.7."}`)
+	}))
+	defer srv.Close()
+
+	old := releaseURL
+	setReleaseURL(srv.URL)
+	defer setReleaseURL(old)
+
+	_, err := CheckLatest(context.Background(), "0.1.0")
+	if err == nil {
+		t.Fatal("a rate-limited API produced no error")
+	}
+	if !strings.Contains(err.Error(), "rate limit") {
+		t.Errorf("the error does not name the rate limit: %v", err)
+	}
+	if !strings.Contains(err.Error(), "releases/latest") {
+		t.Errorf("the error does not offer a way through: %v", err)
+	}
+}
+
+// A 403 that is not the rate limit must not claim to be one.
+func TestPlainForbiddenIsNotReportedAsARateLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	old := releaseURL
+	setReleaseURL(srv.URL)
+	defer setReleaseURL(old)
+
+	_, err := CheckLatest(context.Background(), "0.1.0")
+	if err == nil {
+		t.Fatal("a 403 produced no error")
+	}
+	if strings.Contains(err.Error(), "rate limit") {
+		t.Errorf("a plain 403 was reported as a rate limit: %v", err)
+	}
+}
