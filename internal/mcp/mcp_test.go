@@ -365,3 +365,109 @@ func TestEmptyLinesAreIgnored(t *testing.T) {
 		t.Fatalf("blank lines produced %d responses", len(got))
 	}
 }
+
+// Breadth, the same way internal/cli tests every command: call every
+// advertised tool once against a full fixture set. It catches the
+// panics and the malformed payloads that only appear when a run
+// closure is actually executed — most of them never were.
+func TestEveryToolRuns(t *testing.T) {
+	// A stand-in status page, so bwg_incidents does not reach the real
+	// bwhstatus.com from a test.
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/atom+xml")
+		fmt.Fprint(w, `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>BandwagonHost Status</title>
+<entry><id>https://bwhstatus.com/issue.php?id=1</id>
+<title>Packet loss in Tokyo</title>
+<updated>2026-08-06T10:00:00-07:00</updated>
+<published>2026-08-06T09:00:00-07:00</published>
+<content type="text">Investigating packet loss in Tokyo, JP.</content></entry></feed>`)
+	}))
+	defer feed.Close()
+	t.Setenv("BWG_STATUS_FEED", feed.URL)
+
+	// Plausible arguments for the tools that need them. A tool missing
+	// from this map is called with none, which is what an agent that
+	// read only the schema would do for an all-optional tool.
+	args := map[string]string{
+		"bwg_power":           `{"action":"restart"}`,
+		"bwg_set_ptr":         `{"ip":"203.0.113.10","ptr":"box.example.com"}`,
+		"bwg_set_hostname":    `{"hostname":"box.example.com"}`,
+		"bwg_snapshot_create": `{"description":"before the upgrade"}`,
+	}
+
+	s, _, _, _ := newTestServer(t, false)
+	for _, tl := range s.toolset() {
+		t.Run(tl.Name, func(t *testing.T) {
+			// A fresh server per tool: Serve consumes its input stream.
+			srv, in, out, _ := newTestServer(t, false)
+			a := args[tl.Name]
+			if a == "" {
+				a = "{}"
+			}
+			got := exchange(t, srv, in, out, fmt.Sprintf(
+				`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`,
+				tl.Name, a))
+
+			if len(got) != 1 {
+				t.Fatalf("got %d responses, want 1", len(got))
+			}
+			if errObj, ok := got[0]["error"]; ok {
+				t.Fatalf("%s failed at the protocol level: %v", tl.Name, errObj)
+			}
+			result, ok := got[0]["result"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s returned no result: %v", tl.Name, got[0])
+			}
+			if result["isError"] == true {
+				t.Fatalf("%s reported a tool error: %v", tl.Name, result)
+			}
+			// Every tool answers with text content an agent can read.
+			content, ok := result["content"].([]any)
+			if !ok || len(content) == 0 {
+				t.Fatalf("%s returned no content: %v", tl.Name, result)
+			}
+			text, _ := content[0].(map[string]any)["text"].(string)
+			if strings.TrimSpace(text) == "" {
+				t.Fatalf("%s returned empty text", tl.Name)
+			}
+			var payload any
+			if err := json.Unmarshal([]byte(text), &payload); err != nil {
+				t.Fatalf("%s returned text that is not JSON: %v\n%s", tl.Name, err, text)
+			}
+		})
+	}
+}
+
+// The tool an agent reaches for first is the fleet overview, so its
+// shape is worth pinning rather than only its exit status.
+func TestIncidentsToolExplainsItself(t *testing.T) {
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Status</title>
+<entry><id>https://bwhstatus.com/issue.php?id=2</id>
+<title>Osaka upstream maintenance</title>
+<updated>2026-08-06T10:00:00-07:00</updated>
+<published>2026-08-06T09:00:00-07:00</published>
+<content type="text">Location: Osaka, Japan. Impacts VMs on nodes v31xx.</content>
+</entry></feed>`)
+	}))
+	defer feed.Close()
+	t.Setenv("BWG_STATUS_FEED", feed.URL)
+
+	s, _, _, _ := newTestServer(t, true)
+	res, err := s.incidentsTool(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("incidentsTool returned %T", res)
+	}
+	// The matching is a heuristic; the payload has to say so, or an
+	// agent will read "no match" as "all clear". See TASTE.md.
+	blob, _ := json.Marshal(m)
+	if !strings.Contains(strings.ToLower(string(blob)), "heuristic") {
+		t.Errorf("the incidents payload does not qualify its own matching: %s", blob)
+	}
+}

@@ -83,8 +83,7 @@ func renderInfo(w io.Writer, server string, info *kiwivm.ServiceInfo) {
 	}
 	output.Tabbed(w, rows)
 
-	fmt.Fprintf(w, "\n%s\n", output.Dim("Bandwidth"))
-	output.Tabbed(w, [][2]string{
+	output.Section(w, "Bandwidth", [][2]string{
 		{"Used", fmt.Sprintf("%s %s of %s",
 			output.Bar(b.Percent, 20), output.Usage(b.Percent), output.Bytes(b.Total))},
 		{"Free", output.Bytes(b.Free)},
@@ -92,14 +91,13 @@ func renderInfo(w io.Writer, server string, info *kiwivm.ServiceInfo) {
 		{"Multiplier", multiplierNote(b)},
 	})
 
-	if ptr := info.PTR; len(ptr) > 0 {
-		fmt.Fprintf(w, "\n%s\n", output.Dim("rDNS"))
-		rows := make([][2]string, 0, len(ptr))
-		for _, ip := range ptr.Keys() {
-			rows = append(rows, [2]string{ip, ptr[ip]})
-		}
-		output.Tabbed(w, rows)
+	// KiwiVM returns an entry per address with an empty value where no
+	// PTR is set, so the section is only real if something is in it.
+	ptrRows := make([][2]string, 0, len(info.PTR))
+	for _, ip := range info.PTR.Keys() {
+		ptrRows = append(ptrRows, [2]string{ip, info.PTR[ip]})
 	}
+	output.Section(w, "rDNS", ptrRows)
 
 	if iso := info.ISO1; iso != "" {
 		fmt.Fprintf(w, "\n%s booting from ISO %s\n", output.Warn("!"), output.Strong(iso))
@@ -141,11 +139,10 @@ func renderHealth(w io.Writer, info *kiwivm.ServiceInfo) {
 	if info.Healthy() && info.AbusePercent() < 75 {
 		return
 	}
-	fmt.Fprintf(w, "\n%s\n", output.Dim("Health"))
 
 	var rows [][2]string
 	if info.Suspended.Bool() {
-		rows = append(rows, [2]string{"Suspended", output.Bad("yes — see: bwg abuse")})
+		rows = append(rows, [2]string{"Suspended", suspensionNote(info)})
 	}
 	if info.PolicyViolation.Bool() {
 		rows = append(rows, [2]string{"Policy violation", output.Bad("unresolved — see: bwg abuse")})
@@ -163,5 +160,26 @@ func renderHealth(w io.Writer, info *kiwivm.ServiceInfo) {
 		}
 		rows = append(rows, [2]string{ip, output.Bad(detail)})
 	}
-	output.Tabbed(w, rows)
+	output.Section(w, "Health", rows)
+}
+
+// suspensionNote says why the box is probably suspended instead of
+// always pointing at `bwg abuse`.
+//
+// KiwiVM suspends for an exhausted transfer quota as well as for abuse,
+// and reports both the same way. A box suspended at 100% bandwidth with
+// zero abuse points sent people to `bwg abuse`, which correctly
+// answered "nothing outstanding" — a dead end at exactly the moment the
+// answer mattered. The cause is an inference, so it is phrased as one,
+// and the quota reset is the fact that resolves it.
+func suspensionNote(info *kiwivm.ServiceInfo) string {
+	b := info.Bandwidth()
+	if b.Total > 0 && b.Percent >= 100 && info.AbusePercent() == 0 && !info.PolicyViolation.Bool() {
+		note := "yes — transfer quota exhausted (the usual cause)"
+		if d := b.ResetsIn(); d > 0 {
+			note += "; resets in " + output.Duration(d)
+		}
+		return output.Bad(note)
+	}
+	return output.Bad("yes — see: bwg abuse")
 }

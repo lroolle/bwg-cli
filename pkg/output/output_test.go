@@ -259,3 +259,59 @@ func TestTabbedSkipsEmptyValues(t *testing.T) {
 		t.Errorf("populated values missing: %s", out)
 	}
 }
+
+// Section exists because Tabbed drops empty values: a heading printed
+// above nothing reads as data that failed to load, which is what
+// `bwg info` did for rDNS when no PTR was set.
+func TestSectionOmitsAHeadingWithNothingUnderIt(t *testing.T) {
+	var buf bytes.Buffer
+	Section(&buf, "rDNS", [][2]string{
+		{"203.0.113.10", ""},
+		{"2001:db8::", ""},
+	})
+	if buf.String() != "" {
+		t.Errorf("an all-empty section printed something: %q", buf.String())
+	}
+
+	buf.Reset()
+	Section(&buf, "rDNS", nil)
+	if buf.String() != "" {
+		t.Errorf("an empty section printed something: %q", buf.String())
+	}
+
+	buf.Reset()
+	Section(&buf, "rDNS", [][2]string{
+		{"203.0.113.10", "box.example.com"},
+		{"2001:db8::", ""},
+	})
+	out := buf.String()
+	if !strings.Contains(out, "rDNS") || !strings.Contains(out, "box.example.com") {
+		t.Errorf("a populated section lost its heading or its row: %q", out)
+	}
+	if strings.Contains(out, "2001:db8::") {
+		t.Errorf("the empty row survived: %q", out)
+	}
+	if !strings.HasPrefix(out, "\n") {
+		t.Errorf("a section must open with a blank line: %q", out)
+	}
+}
+
+// "1 keys" is the kind of detail that makes a tool feel unfinished.
+func TestCount(t *testing.T) {
+	cases := []struct {
+		n    int
+		noun string
+		want string
+	}{
+		{0, "key", "0 keys"},
+		{1, "key", "1 key"},
+		{2, "key", "2 keys"},
+		{1, "server", "1 server"},
+		{12, "point", "12 points"},
+	}
+	for _, c := range cases {
+		if got := Count(c.n, c.noun); got != c.want {
+			t.Errorf("Count(%d, %q) = %q, want %q", c.n, c.noun, got, c.want)
+		}
+	}
+}

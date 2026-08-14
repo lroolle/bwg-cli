@@ -132,3 +132,95 @@ func boolInt(b bool) int {
 	}
 	return 0
 }
+
+// KiwiVM returns one PTR entry per address whether or not a record is
+// set, so `bwg info` used to print an "rDNS" heading with nothing
+// under it — which reads as data that failed to load.
+func TestInfoOmitsTheRDNSHeadingWhenNothingIsSet(t *testing.T) {
+	unset := strings.Replace(serviceInfoBody,
+		`"ptr":{"203.0.113.10":"tokyo.example.com"}`,
+		`"ptr":{"203.0.113.10":"","2001:db8::":""}`, 1)
+	if unset == serviceInfoBody {
+		t.Fatal("the fixture no longer contains the ptr field")
+	}
+
+	h := newHarness(t, map[string]string{"getServiceInfo": unset})
+	if err := h.run("info"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(h.stdout.String(), "rDNS") {
+		t.Errorf("an empty rDNS section was printed:\n%s", h.stdout)
+	}
+
+	// With a record set, the section is real and must appear.
+	h = newHarness(t, map[string]string{"getServiceInfo": serviceInfoBody})
+	if err := h.run("info"); err != nil {
+		t.Fatal(err)
+	}
+	out := h.stdout.String()
+	if !strings.Contains(out, "rDNS") || !strings.Contains(out, "tokyo.example.com") {
+		t.Errorf("a set PTR record did not render:\n%s", out)
+	}
+}
+
+// The health block is the one part of `bwg info` people act on, so it
+// appears exactly when something is wrong and stays quiet otherwise.
+func TestInfoHealthSectionAppearsOnlyWhenItHasSomethingToSay(t *testing.T) {
+	h := newHarness(t, map[string]string{"getServiceInfo": serviceInfoBody})
+	if err := h.run("info"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(h.stdout.String(), "Health") {
+		t.Errorf("a healthy box printed a health section:\n%s", h.stdout)
+	}
+
+	suspended := strings.Replace(serviceInfoBody, `"suspended":0`, `"suspended":1`, 1)
+	h = newHarness(t, map[string]string{"getServiceInfo": suspended})
+	if err := h.run("info"); err != nil {
+		t.Fatal(err)
+	}
+	out := h.stdout.String()
+	if !strings.Contains(out, "Health") || !strings.Contains(out, "Suspended") {
+		t.Errorf("a suspended box hid the reason:\n%s", out)
+	}
+	if !strings.Contains(out, "bwg abuse") {
+		t.Errorf("the health section does not name the command that explains it:\n%s", out)
+	}
+}
+
+// The dead end that prompted this: a box suspended at 100% bandwidth
+// with no abuse case was told to run `bwg abuse`, which answered
+// "nothing outstanding".
+func TestSuspensionNamesTheLikelyCause(t *testing.T) {
+	exhausted := strings.NewReplacer(
+		`"suspended":0`, `"suspended":1`,
+		`"data_counter":536870912000`, `"data_counter":1073741824000`,
+		`"total_abuse_points":100`, `"total_abuse_points":0`,
+	).Replace(serviceInfoBody)
+
+	h := newHarness(t, map[string]string{"getServiceInfo": exhausted})
+	if err := h.run("info"); err != nil {
+		t.Fatal(err)
+	}
+	out := h.stdout.String()
+	if !strings.Contains(out, "transfer quota exhausted") {
+		t.Errorf("a bandwidth suspension does not name the quota:\n%s", out)
+	}
+	if !strings.Contains(out, "resets in") {
+		t.Errorf("the note does not say when it lifts:\n%s", out)
+	}
+	if strings.Contains(out, "see: bwg abuse") {
+		t.Errorf("still sending people to an empty abuse page:\n%s", out)
+	}
+
+	// With abuse points on the record, the abuse page is the right
+	// place and the guess would be wrong.
+	withAbuse := strings.Replace(serviceInfoBody, `"suspended":0`, `"suspended":1`, 1)
+	h = newHarness(t, map[string]string{"getServiceInfo": withAbuse})
+	if err := h.run("info"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.stdout.String(), "see: bwg abuse") {
+		t.Errorf("an abuse suspension does not point at the abuse log:\n%s", h.stdout)
+	}
+}

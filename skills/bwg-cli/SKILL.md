@@ -16,7 +16,7 @@ bwg
 │   └── --tag --alerting --sort --live
 ├── info                        # one server: plan, addresses, quota (fast)
 ├── status                      # one server: live power/load/disk (slow, ~15s)
-├── usage                       # traffic per day  --raw --days
+├── usage                       # traffic per day, last 30d  --raw --days
 ├── audit                       # panel audit log  --limit --grep
 ├── ratelimit                   # remaining API budget
 ├── incidents [id]              # BWH status page, matched to YOUR fleet
@@ -89,7 +89,7 @@ specific box, so a fleet is a list of pairs.
 ```bash
 # One box, no config file — the agent-friendly path:
 export BWG_VEID=1347645
-export BWG_KIWIVM_API_KEY=private_xxxxxxxx     # or "1347645:private_xxx" combined
+export BWG_API_KEY=private_xxxxxxxx     # or "1347645:private_xxx" combined
 
 # A fleet:
 bwg server add tokyo --veid 1347645 --key private_xxx --tag prod
@@ -128,7 +128,10 @@ status    → {"server","state","running","sshPort","hostname",
               "resources":{"memUsed","memTotal","diskUsed","diskTotal",
               "loadAverage"},"throttled":{"cpu","disk"},"live":{...}}
 usage     → {"server","vmType","days":[{"date","networkIn","networkOut",
-              "diskRead","diskWrite","cpuAvg","samples"}],"totals","bandwidth"}
+              "diskRead","diskWrite","cpuAvg","samples"}],"totals","bandwidth",
+              "window":{"days","available"}}
+              # the last 30 days by default; --days 0 for everything KiwiVM
+              # kept. "totals" covers the window, never more.
 snapshot  → {"server","snapshots":[{"fileName","os","description","size",
               "sticky","purgesIn","md5","downloadLinkSSL"}],"count"}
 abuse ls  → {"server","abusePoints","maxAbusePoints","percent",

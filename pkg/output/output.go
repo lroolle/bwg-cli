@@ -159,7 +159,8 @@ func cell(row []string, i int) string {
 	return ""
 }
 
-// Tabbed renders key/value detail lines aligned on the values.
+// Tabbed renders key/value detail lines aligned on the values. A pair
+// with an empty value is skipped: a missing fact is not a fact.
 func Tabbed(w io.Writer, pairs [][2]string) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, p := range pairs {
@@ -169,6 +170,27 @@ func Tabbed(w io.Writer, pairs [][2]string) {
 		fmt.Fprintf(tw, "%s\t%s\n", Dim(p[0]+":"), p[1])
 	}
 	tw.Flush()
+}
+
+// Section renders a blank line, a heading and its detail lines — but
+// only if at least one pair survives Tabbed's empty-value rule.
+//
+// The alternative is what bwg shipped in v0.1.0: `bwg info` printing a
+// bare "rDNS" heading with nothing under it, because the API returns
+// one entry per IP whether or not a PTR is set. A heading over nothing
+// reads as data that failed to load.
+func Section(w io.Writer, title string, pairs [][2]string) {
+	kept := make([][2]string, 0, len(pairs))
+	for _, p := range pairs {
+		if p[1] != "" {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\n%s\n", Dim(title))
+	Tabbed(w, kept)
 }
 
 // CSV writes headers and rows as comma-separated values.
@@ -323,6 +345,18 @@ func severity(percent float64) Color {
 // Usage renders a percentage in the colour its severity earns.
 func Usage(percent float64) string {
 	return Colorize(Percent(percent), severity(percent))
+}
+
+// Count renders a quantity with its noun: "1 key", "3 keys". Every
+// count bwg prints goes through here, so no message has to hedge with
+// "key(s)" — a tool that cannot say "1 key" reads like a tool nobody
+// finished. Regular -s plurals only; there are no irregular nouns in
+// this vocabulary and a pluralization engine would be absurd here.
+func Count(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // Truncate shortens s to at most n characters, marking the cut.

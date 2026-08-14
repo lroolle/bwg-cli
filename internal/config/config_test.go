@@ -22,7 +22,7 @@ func tempConfig(t *testing.T) string {
 // clearEnv isolates a test from whatever the developer has exported.
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{EnvConfig, EnvServer, EnvVEID, EnvAPIKey, EnvAPIKeyAlt, EnvReadOnly} {
+	for _, k := range []string{EnvConfig, EnvServer, EnvVEID, EnvAPIKey, EnvAPIKeyLegacy, EnvReadOnly} {
 		t.Setenv(k, "")
 	}
 }
@@ -250,7 +250,7 @@ func TestResolvePrecedence(t *testing.T) {
 	t.Run("env credentials beat the default", func(t *testing.T) {
 		clearEnv(t)
 		t.Setenv(EnvVEID, "9999")
-		t.Setenv(EnvAPIKeyAlt, testKey)
+		t.Setenv(EnvAPIKey, testKey)
 		s, err := cfg.Resolve("")
 		if err != nil {
 			t.Fatal(err)
@@ -325,7 +325,7 @@ func TestResolveEnvByName(t *testing.T) {
 // billing portal's CSV uses.
 func TestServerFromEnvAcceptsCombinedKey(t *testing.T) {
 	clearEnv(t)
-	t.Setenv(EnvAPIKeyAlt, "1347645:"+testKey)
+	t.Setenv(EnvAPIKey, "1347645:"+testKey)
 
 	s := ServerFromEnv()
 	if s == nil {
@@ -341,7 +341,7 @@ func TestServerFromEnvIgnoresNonVEIDPrefix(t *testing.T) {
 	// A key that merely contains a colon must not be mistaken for a
 	// combined pair, or the key silently loses its first segment.
 	t.Setenv(EnvVEID, "1347645")
-	t.Setenv(EnvAPIKeyAlt, "private:weird")
+	t.Setenv(EnvAPIKey, "private:weird")
 
 	s := ServerFromEnv()
 	if s == nil {
@@ -358,7 +358,7 @@ func TestServerFromEnvNeedsBothHalves(t *testing.T) {
 		t.Error("an empty environment produced a server")
 	}
 
-	t.Setenv(EnvAPIKeyAlt, testKey)
+	t.Setenv(EnvAPIKey, testKey)
 	if ServerFromEnv() != nil {
 		t.Error("a key with no veid produced a server — it cannot authenticate")
 	}
@@ -470,5 +470,58 @@ func TestDefaultPathHonoursEnvironment(t *testing.T) {
 	// Built with filepath.Join so the separator is right on Windows too.
 	if want := filepath.Join(xdg, "bwg", "config.yaml"); DefaultPath() != want {
 		t.Errorf("DefaultPath() = %q, want %q", DefaultPath(), want)
+	}
+}
+
+// The v0.1.0 spelling has to keep working — it is in people's shell
+// profiles — but it must not be the one bwg talks about. See TASTE.md.
+func TestLegacyAPIKeyEnvStillAuthenticates(t *testing.T) {
+	clearEnv(t)
+	t.Setenv(EnvVEID, "1347645")
+	t.Setenv(EnvAPIKeyLegacy, testKey)
+
+	s := ServerFromEnv()
+	if s == nil {
+		t.Fatal("the legacy variable stopped supplying credentials")
+	}
+	if s.APIKey != testKey {
+		t.Errorf("key = %q, want the one from %s", s.APIKey, EnvAPIKeyLegacy)
+	}
+	if !LegacyAPIKeyEnv() {
+		t.Error("the legacy variable was in use and went unreported")
+	}
+	// Messages must point at the variable that is actually in play.
+	if got := APIKeyEnvVar(); got != EnvAPIKeyLegacy {
+		t.Errorf("APIKeyEnvVar() = %q, want %q", got, EnvAPIKeyLegacy)
+	}
+}
+
+func TestCurrentAPIKeyEnvWinsAndSilencesTheWarning(t *testing.T) {
+	clearEnv(t)
+	t.Setenv(EnvVEID, "1347645")
+	t.Setenv(EnvAPIKey, testKey)
+	t.Setenv(EnvAPIKeyLegacy, "private_stale_key_from_last_year")
+
+	s := ServerFromEnv()
+	if s == nil || s.APIKey != testKey {
+		t.Fatalf("the current variable did not win: %+v", s)
+	}
+	// Both set is what migrating looks like; warning then would punish
+	// the person who already did the work.
+	if LegacyAPIKeyEnv() {
+		t.Error("both variables set was reported as legacy use")
+	}
+	if got := APIKeyEnvVar(); got != EnvAPIKey {
+		t.Errorf("APIKeyEnvVar() = %q, want %q", got, EnvAPIKey)
+	}
+}
+
+func TestNoAPIKeyEnvIsNotLegacyUse(t *testing.T) {
+	clearEnv(t)
+	if LegacyAPIKeyEnv() {
+		t.Error("an empty environment was reported as legacy use")
+	}
+	if got := APIKeyEnvVar(); got != EnvAPIKey {
+		t.Errorf("APIKeyEnvVar() = %q, want the current name", got)
 	}
 }

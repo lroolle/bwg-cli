@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lroolle/bwg-cli/kiwivm"
 )
 
 // apiBodies is a full set of plausible KiwiVM responses, so any
@@ -503,5 +508,212 @@ func TestPolicyViolationShowsTimeRemaining(t *testing.T) {
 	// Duration truncates rather than rounds, so 36h reads as "1d 11h".
 	if !strings.Contains(out, "in 1d 1") {
 		t.Errorf("expected roughly a day and a half remaining:\n%s", out)
+	}
+}
+
+// -- input handling ---------------------------------------------------
+
+// The one mistake worth catching here is pasting a private key into a
+// command that ships it to a third party, so the check runs before any
+// network call and says what it expected.
+func TestKeysSetRejectsAnythingThatIsNotAPublicKey(t *testing.T) {
+	h := newHarness(t, apiBodies)
+	dir := t.TempDir()
+
+	private := filepath.Join(dir, "id_ed25519")
+	if err := os.WriteFile(private, []byte(
+		"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEA\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := h.run("keys", "set", private, "--yes")
+	if err == nil {
+		t.Fatal("a private key was accepted")
+	}
+	if !strings.Contains(err.Error(), "private key") {
+		t.Errorf("the error does not name the likely mistake: %v", err)
+	}
+	for _, req := range h.seen() {
+		if strings.Contains(req, "updateSshKeys") {
+			t.Errorf("a rejected key still reached the API: %v", h.seen())
+		}
+	}
+
+	// A real key file, comments and blank lines included, goes through.
+	pub := filepath.Join(dir, "id_ed25519.pub")
+	if err := os.WriteFile(pub, []byte(
+		"# my laptop\n\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA eric@laptop\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.run("keys", "set", pub, "--yes"); err != nil {
+		t.Fatalf("a valid public key was rejected: %v", err)
+	}
+	if !strings.Contains(h.stdout.String(), "1 key stored") {
+		t.Errorf("the confirmation does not count the keys: %s", h.stdout)
+	}
+
+	// --clear and key files are contradictory instructions.
+	if err := h.run("keys", "set", "--clear", pub, "--yes"); err == nil {
+		t.Error("--clear with key files was accepted")
+	}
+	if err := h.run("keys", "set", "--yes"); err == nil {
+		t.Error("keys set with nothing to set was accepted")
+	}
+}
+
+func TestLooksLikePublicKey(t *testing.T) {
+	for _, ok := range []string{
+		"ssh-rsa AAAAB3Nza user@host",
+		"ssh-ed25519 AAAAC3Nza",
+		"ecdsa-sha2-nistp256 AAAAE2Vj",
+		"sk-ssh-ed25519@openssh.com AAAAG",
+	} {
+		if !looksLikePublicKey(ok) {
+			t.Errorf("%q was rejected", ok)
+		}
+	}
+	for _, bad := range []string{
+		"", "-----BEGIN OPENSSH PRIVATE KEY-----", "not a key at all",
+		" ssh-rsa AAAA", // leading space: a trimmed line never has one
+	} {
+		if looksLikePublicKey(bad) {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
+// `bwg run` takes its script from an argument, a file or stdin, and
+// has to refuse rather than send an empty script to a root shell.
+func TestRunScriptSources(t *testing.T) {
+	h := newHarness(t, apiBodies)
+	dir := t.TempDir()
+	script := filepath.Join(dir, "bootstrap.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\napt-get update\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := readScript(h.app, []string{"echo hi"}, ""); err != nil || got != "echo hi" {
+		t.Errorf("argument form: got %q, %v", got, err)
+	}
+	if got, err := readScript(h.app, nil, script); err != nil || !strings.Contains(got, "apt-get") {
+		t.Errorf("--file form: got %q, %v", got, err)
+	}
+	if _, err := readScript(h.app, []string{"echo hi"}, script); err == nil {
+		t.Error("an argument and --file together were accepted")
+	}
+	if _, err := readScript(h.app, nil, filepath.Join(dir, "missing.sh")); err == nil {
+		t.Error("a missing --file was accepted")
+	}
+
+	h.app.In = strings.NewReader("uptime\n")
+	if got, err := readScript(h.app, nil, ""); err != nil || strings.TrimSpace(got) != "uptime" {
+		t.Errorf("stdin form: got %q, %v", got, err)
+	}
+	h.app.In = strings.NewReader("   \n\n")
+	if _, err := readScript(h.app, nil, ""); err == nil {
+		t.Error("an empty script on stdin was accepted")
+	}
+}
+
+// The consent card shows what the script does, not its shebang.
+func TestFirstScriptLineSkipsCommentsAndShebangs(t *testing.T) {
+	cases := map[string]string{
+		"#!/bin/sh\n# set up\napt-get update\n": "apt-get update",
+		"apt-get update":                        "apt-get update",
+		"\n\n  uptime  \n":                      "uptime",
+		// Nothing but comments: show them rather than nothing at all.
+		"# only comments\n": "# only comments",
+	}
+	for in, want := range cases {
+		if got := firstScriptLine(in); got != want {
+			t.Errorf("firstScriptLine(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Backup tokens are 64 opaque characters, so a prefix has to work —
+// and an ambiguous prefix has to say so rather than pick one.
+func TestResolveBackupByPrefix(t *testing.T) {
+	list := &kiwivm.BackupList{Backups: map[string]kiwivm.Backup{
+		"aaaa1111": {Token: "aaaa1111", OS: "debian-12", Timestamp: kiwivm.Int(1754524800)},
+		"aaaa2222": {Token: "aaaa2222", OS: "debian-12", Timestamp: kiwivm.Int(1754611200)},
+		"bbbb3333": {Token: "bbbb3333", OS: "debian-12", Timestamp: kiwivm.Int(1754697600)},
+	}}
+
+	got, err := resolveBackup(list, "bbbb3333")
+	if err != nil || got.Token != "bbbb3333" {
+		t.Errorf("exact token: got %v, %v", got.Token, err)
+	}
+	got, err = resolveBackup(list, "bbbb")
+	if err != nil || got.Token != "bbbb3333" {
+		t.Errorf("unique prefix: got %v, %v", got.Token, err)
+	}
+	if _, err := resolveBackup(list, "aaaa"); err == nil {
+		t.Error("an ambiguous prefix resolved to one backup")
+	} else if !strings.Contains(err.Error(), "longer prefix") {
+		t.Errorf("the ambiguity error does not say what to do: %v", err)
+	}
+	if _, err := resolveBackup(list, "zzzz"); err == nil {
+		t.Error("an unknown prefix resolved")
+	} else if !strings.Contains(err.Error(), "aaaa1111") {
+		t.Errorf("the error does not list what is available: %v", err)
+	}
+	if _, err := resolveBackup(&kiwivm.BackupList{}, "aaaa"); err == nil {
+		t.Error("a prefix resolved against an empty backup list")
+	}
+}
+
+// The console screenshot is the only way to see a box that will not
+// boot, so both the success and the "this hypervisor has no console"
+// paths have to be right.
+func TestStatusScreenshot(t *testing.T) {
+	// A one-pixel PNG, base64 as KiwiVM returns it.
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGMAAQAABQAB" +
+		"h6FO1AAAAABJRU5ErkJggg=="
+	live := strings.Replace(apiBodies["getLiveServiceInfo"], `"ve_status":"Running"`,
+		`"ve_status":"Running","screendump_png_base64":"`+png+`"`, 1)
+
+	h := newHarness(t, map[string]string{"getLiveServiceInfo": live})
+	shot := filepath.Join(t.TempDir(), "console.png")
+	if err := h.run("status", "--screenshot", shot); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(shot)
+	if err != nil {
+		t.Fatalf("no screenshot written: %v", err)
+	}
+	if !bytes.HasPrefix(data, []byte("\x89PNG")) {
+		t.Errorf("the file is not a PNG: %q", data[:min(8, len(data))])
+	}
+	// The path goes to stderr: it is commentary, not data.
+	if !strings.Contains(h.stderr.String(), shot) {
+		t.Errorf("the screenshot path was not reported: %q", h.stderr)
+	}
+
+	// OpenVZ has no VGA console. Saying so beats writing an empty file.
+	h = newHarness(t, apiBodies)
+	err = h.run("status", "--screenshot", filepath.Join(t.TempDir(), "none.png"))
+	if err == nil {
+		t.Fatal("a VPS with no screenshot wrote one anyway")
+	}
+	if !strings.Contains(err.Error(), "OpenVZ") {
+		t.Errorf("the error does not explain when this happens: %v", err)
+	}
+}
+
+// Completions are a shipped surface: `make completions` runs these and
+// a panic here would break the release.
+func TestCompletionScriptsGenerate(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		h := newHarness(t, nil)
+		if err := h.run("completion", shell); err != nil {
+			t.Fatalf("completion %s: %v", shell, err)
+		}
+		if !strings.Contains(h.stdout.String(), "bwg") {
+			t.Errorf("the %s completion does not mention bwg", shell)
+		}
+	}
+	h := newHarness(t, nil)
+	if err := h.run("completion", "tcsh"); err == nil {
+		t.Error("an unsupported shell was accepted")
 	}
 }

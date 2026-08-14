@@ -23,7 +23,7 @@ There is no account-level API — every call needs the pair for one specific VPS
 
 ```bash
 export BWG_VEID=1347645
-export BWG_KIWIVM_API_KEY=private_xxxxxxxx
+export BWG_API_KEY=private_xxxxxxxx
 bwg --read-only info
 ```
 

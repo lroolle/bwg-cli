@@ -31,6 +31,10 @@ import (
 )
 
 // Environment variables the fleet reads.
+//
+// The pair a command needs is BWG_VEID and BWG_API_KEY. They are named
+// as a pair on purpose: they are useless apart, and a credential whose
+// two halves are spelled in different styles is one people copy wrong.
 const (
 	// EnvConfig overrides the config file location.
 	EnvConfig = "BWG_CONFIG"
@@ -42,9 +46,11 @@ const (
 	// accepts a combined "veid:api_key", which is how the billing
 	// portal's CSV pairs them.
 	EnvAPIKey = "BWG_API_KEY"
-	// EnvAPIKeyAlt is the longer spelling of EnvAPIKey, matching the
-	// "KiwiVM API key" label in the BandwagonHost panel.
-	EnvAPIKeyAlt = "BWG_KIWIVM_API_KEY"
+	// EnvAPIKeyLegacy is the v0.1.0 spelling, which echoed the panel's
+	// "KiwiVM API key" label. It still works — someone's shell profile
+	// has it — but it is not documented anywhere and bwg says so once
+	// per run. See TASTE.md; remove it at v1.0.
+	EnvAPIKeyLegacy = "BWG_KIWIVM_API_KEY"
 	// EnvReadOnly, when truthy, forces every client read-only.
 	EnvReadOnly = "BWG_READ_ONLY"
 )
@@ -395,7 +401,7 @@ func (c *Config) Filter(tags []string) []*Server {
 // combined "veid:api_key" — the pairing the billing portal's CSV
 // export uses, and the only form that needs a single variable.
 func ServerFromEnv() *Server {
-	key := firstNonEmpty(os.Getenv(EnvAPIKey), os.Getenv(EnvAPIKeyAlt))
+	key := firstNonEmpty(os.Getenv(EnvAPIKey), os.Getenv(EnvAPIKeyLegacy))
 	veid := strings.TrimSpace(os.Getenv(EnvVEID))
 
 	if v, k, ok := strings.Cut(key, ":"); ok {
@@ -414,6 +420,24 @@ func ServerFromEnv() *Server {
 		Name: EnvServerName, VEID: veid, APIKey: key, FromEnv: true,
 		Note: "from the environment",
 	}
+}
+
+// APIKeyEnvVar names the variable the key would come from, so that
+// error messages and `bwg server show env` point at the one actually
+// in play rather than at whichever spelling the docs happen to use.
+func APIKeyEnvVar() string {
+	if LegacyAPIKeyEnv() {
+		return EnvAPIKeyLegacy
+	}
+	return EnvAPIKey
+}
+
+// LegacyAPIKeyEnv reports whether the deprecated spelling is the only
+// one set. Both set is not a warning: that is what migrating looks
+// like, and the current name wins.
+func LegacyAPIKeyEnv() bool {
+	return strings.TrimSpace(os.Getenv(EnvAPIKey)) == "" &&
+		strings.TrimSpace(os.Getenv(EnvAPIKeyLegacy)) != ""
 }
 
 // EnvReadOnlyRequested reports whether the environment forces
@@ -444,7 +468,7 @@ func (c *Config) Resolve(name string) (*Server, error) {
 				return env, nil
 			}
 			return nil, fmt.Errorf("%w: %s (set %s and %s to define it)",
-				ErrNotFound, EnvServerName, EnvVEID, EnvAPIKeyAlt)
+				ErrNotFound, EnvServerName, EnvVEID, EnvAPIKey)
 		}
 		s, ok := c.Servers[n]
 		if !ok {

@@ -21,38 +21,46 @@ const (
 	Bold   Color = "1"
 )
 
+// EnvColor forces colour on or off: "always" / "never".
+const EnvColor = "BWG_COLOR"
+
 var (
 	once    sync.Once
 	enabled bool
 )
 
 // colorEnabled decides once whether to emit escape codes.
+func colorEnabled() bool {
+	once.Do(func() { enabled = colorFor(os.LookupEnv, IsTerminal(os.Stdout)) })
+	return enabled
+}
+
+// colorFor is the decision itself, kept pure so the precedence between
+// three environment variables and the terminal check is testable
+// without a pty.
 //
 // Piped output is never coloured — the reason --json is trustworthy is
 // that nothing decorates it. NO_COLOR is honoured because it is the
 // convention, and BWG_COLOR=always exists for the CI logs and pagers
-// that do render colour despite not being a terminal.
-func colorEnabled() bool {
-	once.Do(func() {
-		switch strings.ToLower(os.Getenv("BWG_COLOR")) {
+// that do render colour despite not being a terminal. BWG_COLOR wins
+// over NO_COLOR: it is the more specific of the two, and someone who
+// sets it is answering this exact question.
+func colorFor(lookup func(string) (string, bool), isTTY bool) bool {
+	if v, _ := lookup(EnvColor); v != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
 		case "always", "force", "1", "yes":
-			enabled = true
-			return
+			return true
 		case "never", "none", "0", "no":
-			enabled = false
-			return
+			return false
 		}
-		if _, set := os.LookupEnv("NO_COLOR"); set {
-			enabled = false
-			return
-		}
-		if os.Getenv("TERM") == "dumb" {
-			enabled = false
-			return
-		}
-		enabled = IsTerminal(os.Stdout)
-	})
-	return enabled
+	}
+	if _, set := lookup("NO_COLOR"); set {
+		return false
+	}
+	if v, _ := lookup("TERM"); v == "dumb" {
+		return false
+	}
+	return isTTY
 }
 
 // SetColor overrides colour detection. Tests use it; so does the root

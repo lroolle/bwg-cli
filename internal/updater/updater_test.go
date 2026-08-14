@@ -2,6 +2,7 @@ package updater
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -257,6 +259,187 @@ func buildTarGz(t *testing.T, name, content string) []byte {
 		t.Fatal(err)
 	}
 	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// Download is the whole point of the package and was the one part
+// nothing exercised: it picks the asset for this platform, fetches it
+// and hands back an executable.
+func TestDownloadPicksThisPlatformsAsset(t *testing.T) {
+	name := AssetName(runtime.GOOS, runtime.GOARCH)
+	body := buildTarGz(t, "bwg", "#!/bin/sh\necho hello\n")
+	if runtime.GOOS == "windows" {
+		body = buildZip(t, "bwg.exe", "#!/bin/sh\necho hello\n")
+	}
+
+	var served string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		served = r.URL.Path
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	rel := &Release{Version: "0.3.0", TagName: "v0.3.0", assets: []asset{
+		{Name: "bwg_someOtherOS_mips.tar.gz", URL: srv.URL + "/wrong"},
+		{Name: name, URL: srv.URL + "/" + name},
+	}}
+
+	path, err := Download(context.Background(), rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+
+	if served != "/"+name {
+		t.Errorf("downloaded %q, want the asset for %s/%s", served, runtime.GOOS, runtime.GOARCH)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "#!/bin/sh\necho hello\n" {
+		t.Errorf("extracted content = %q", content)
+	}
+	if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode()&0111 == 0 {
+		t.Error("the downloaded binary is not executable")
+	}
+}
+
+// A release built without this platform's archive must say so, not
+// download the first thing it finds.
+func TestDownloadWithoutAnAssetForThisPlatform(t *testing.T) {
+	rel := &Release{Version: "0.3.0", TagName: "v0.3.0",
+		assets: []asset{{Name: "bwg_someOtherOS_mips.tar.gz", URL: "http://example.invalid/x"}}}
+
+	_, err := Download(context.Background(), rel)
+	if err == nil {
+		t.Fatal("a release with no matching asset downloaded something")
+	}
+	if !strings.Contains(err.Error(), AssetName(runtime.GOOS, runtime.GOARCH)) {
+		t.Errorf("the error does not name the asset it wanted: %v", err)
+	}
+}
+
+func TestDownloadReportsHTTPFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "gone", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	name := AssetName(runtime.GOOS, runtime.GOARCH)
+	rel := &Release{Version: "0.3.0", assets: []asset{{Name: name, URL: srv.URL + "/" + name}}}
+
+	if _, err := Download(context.Background(), rel); err == nil {
+		t.Fatal("a 404 produced no error")
+	}
+}
+
+func TestExtractRejectsAnArchiveWithoutTheBinary(t *testing.T) {
+	if _, err := extractTarGz(bytes.NewReader(buildTarGz(t, "README.md", "hi"))); err == nil {
+		t.Error("a tar.gz without bwg extracted successfully")
+	}
+	if _, err := extractZip(bytes.NewReader(buildZip(t, "README.md", "hi"))); err == nil {
+		t.Error("a zip without bwg extracted successfully")
+	}
+	if _, err := extractTarGz(strings.NewReader("this is not gzip")); err == nil {
+		t.Error("garbage extracted successfully")
+	}
+}
+
+// The Windows path is never exercised on CI's Linux runners unless it
+// is called directly, and a broken updater is only discovered by the
+// people it breaks.
+func TestExtractZip(t *testing.T) {
+	path, err := extractZip(bytes.NewReader(buildZip(t, "bwg.exe", "binary bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "binary bytes" {
+		t.Errorf("extracted content = %q", content)
+	}
+}
+
+// $TMPDIR is a different filesystem from $HOME on most Linux boxes, so
+// the rename in Replace fails with EXDEV on a perfectly good update.
+// The copy fallback is what makes `bwg update` work there at all.
+func TestInstallCopyIsTheCrossFilesystemFallback(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "downloaded")
+	dst := filepath.Join(dir, "bwg")
+	if err := os.WriteFile(src, []byte("new binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installCopy(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new binary" {
+		t.Errorf("copied content = %q", got)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
+		t.Errorf("the installed binary is not executable (mode %v)", info.Mode())
+	}
+	// The source is left for the caller to clean up, as Download's
+	// contract promises.
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("the downloaded file was consumed: %v", err)
+	}
+}
+
+// A failed install must leave a working bwg behind, not a hole where
+// one used to be.
+func TestReplaceRestoresTheOldBinaryWhenTheInstallFails(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bwg")
+	if err := os.WriteFile(bin, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing to install: neither the rename nor the copy can work.
+	missing := filepath.Join(dir, "download-that-vanished")
+
+	if err := Replace(bin, missing); err == nil {
+		t.Fatal("replacing with a missing file succeeded")
+	}
+	got, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatalf("the old binary was not restored: %v", err)
+	}
+	if string(got) != "old" {
+		t.Errorf("restored binary = %q, want the original", got)
+	}
+}
+
+func buildZip(t *testing.T, name, content string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	hdr := &zip.FileHeader{Name: name, Method: zip.Deflate}
+	hdr.SetMode(0o755)
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return buf.Bytes()

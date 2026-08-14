@@ -244,3 +244,66 @@ unaffected, for the same reason.
 **Expires.** If BandwagonHost ever publishes structured incident data
 naming affected VEIDs, the inference becomes a fact and the hedging
 should go with it.
+
+---
+
+## 2026-08-13 rejected: two spellings for one credential
+
+**Why.** v0.1.0 accepted the API key as either `BWG_API_KEY` or
+`BWG_KIWIVM_API_KEY`, on the reasoning that the second matches the
+"KiwiVM API key" label in the panel and costs one extra `os.Getenv`.
+What it actually cost: the code called the short one canonical, and
+every README, skill file, install script and error message taught the
+long one. So the pair a new user copied read
+
+    export BWG_VEID=1347645
+    export BWG_KIWIVM_API_KEY=private_xxx
+
+— two halves of one credential, spelled in two different styles, one
+of them namespaced twice. Nothing in the tool could tell you which was
+real, because both were. An alias is not free: it is a second name
+that every surface must independently choose between, and they will
+not agree.
+
+**Reuse.** One name per thing, and let the prefix do the namespacing —
+`gh` uses `GH_TOKEN`, not `GH_GITHUB_TOKEN`. `BWG_VEID` and
+`BWG_API_KEY` read as the pair they are. Vendor labels belong in the
+prose that explains where to find the value, not in the variable name.
+
+Keeping the old spelling working is separate from documenting it: it
+is accepted, mentioned nowhere except one line of the README, and
+warned about once per run on stderr naming the replacement. A
+compatibility path that stays silent is a compatibility path forever.
+`bwg server show env` reports whichever variable is actually in play,
+because a tool that will not tell you where its credentials came from
+is the reason this was confusing in the first place.
+
+**Expires.** `BWG_KIWIVM_API_KEY` goes away at v1.0. The warning goes
+with it.
+
+---
+
+## 2026-08-13 rejected: a total that outlived its window
+
+**Why.** `bwg usage` defaulted to `--days 0`: every sample KiwiVM
+kept, which after two years is 600-odd rows, oldest first. The command
+answers "when did the traffic spike", and it put the recent end of the
+series off the bottom of the screen along with the quota summary. It
+was defensible as "we do not hide data" and it was unusable.
+
+The real defect was underneath: `--days 7` trimmed the table but not
+the arithmetic, so seven rows sat above `Total: 5.9 TiB ... over 608d`
+and `--raw` ignored the window entirely. Three parts of one screen
+describing three different spans, each of them individually correct.
+
+**Reuse.** Trim the *data*, once, and let every renderer read the same
+slice — the table, `--raw`, the totals line and the JSON payload
+cannot then disagree. Pick a default that matches the question: the
+window is 30 days because the quota printed underneath it is monthly.
+And say what was withheld — "Showing 30 of the 608 days KiwiVM kept —
+for all of it: bwg usage --days 0" — because a table that silently
+stops reads like a box with no history, which is a worse lie than the
+one truncation was meant to avoid.
+
+**Expires.** No. If a command ever needs two windows on one screen,
+each has to label its own.
