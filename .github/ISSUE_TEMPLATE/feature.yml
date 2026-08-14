@@ -1,0 +1,26 @@
+name: Feature request
+description: Something bwg should do and does not
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to find out or change about your fleet? Describe the situation, not the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today instead
+      description: The panel, a script, another tool — whatever you reach for now.
+    validations:
+      required: true
+
+  - type: input
+    id: endpoint
+    attributes:
+      label: KiwiVM endpoint, if you know it
+      description: "`bwg api ops` lists every endpoint bwg knows. If the capability is not in KiwiVM's API, bwg cannot add it."
+      placeholder: snapshot/list
