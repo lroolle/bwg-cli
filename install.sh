@@ -5,6 +5,7 @@
 #   ... | bash -s -- --system          # install to /usr/local/bin
 #   ... | bash -s -- --bin-dir ~/bin
 #   ... | bash -s -- --skill           # also install the Claude Code skill
+#   BWG_VERSION=v0.2.0 ... | bash      # pin a version instead of latest
 set -eu
 
 REPO="lroolle/bwg-cli"
@@ -42,9 +43,25 @@ esac
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v tar  >/dev/null 2>&1 || die "tar is required"
 
-TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-      | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-[ -n "$TAG" ] || die "could not determine the latest release"
+# Resolve the latest tag from the redirect on /releases/latest rather
+# than from api.github.com, which allows 60 unauthenticated requests an
+# hour *per IP*. Behind a shared NAT, a VPN exit or a CI runner that
+# budget is often already spent by someone else, and the install fails
+# at its first step for a reason that has nothing to do with the user.
+# The API stays as a fallback.
+TAG="${BWG_VERSION:-}"
+if [ -z "$TAG" ]; then
+  TAG=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+        "https://github.com/$REPO/releases/latest" 2>/dev/null \
+        | sed -n 's|.*/tag/||p')
+fi
+if [ -z "$TAG" ]; then
+  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+fi
+[ -n "$TAG" ] || die "could not determine the latest release — pick one yourself:
+  BWG_VERSION=v0.2.0 ... | bash
+  or download it from https://github.com/$REPO/releases/latest"
 
 ASSET="bwg_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/$REPO/releases/download/$TAG/$ASSET"
