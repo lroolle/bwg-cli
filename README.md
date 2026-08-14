@@ -91,7 +91,7 @@ Two values per VPS, both from the **KiwiVM control panel**:
 ```bash
 # One box, no config file
 export BWG_VEID=1347645
-export BWG_KIWIVM_API_KEY=private_xxxxxxxx
+export BWG_API_KEY=private_xxxxxxxx
 
 # A fleet
 bwg server add tokyo --veid 1347645 --key private_xxx --tag prod
@@ -210,7 +210,7 @@ trust.
 ```go
 import "github.com/lroolle/bwg-cli/kiwivm"
 
-c := kiwivm.New("1347645", os.Getenv("BWG_KIWIVM_API_KEY"), kiwivm.ReadOnly())
+c := kiwivm.New("1347645", os.Getenv("BWG_API_KEY"), kiwivm.ReadOnly())
 
 info, err := c.ServiceInfo(ctx)
 if kiwivm.IsAuth(err) { /* the pair is wrong */ }
@@ -251,7 +251,7 @@ Which server a command acts on, most explicit first:
 
 1. `--server <name>`
 2. `$BWG_SERVER`
-3. credentials in the environment (`BWG_VEID` + `BWG_KIWIVM_API_KEY`,
+3. credentials in the environment (`BWG_VEID` + `BWG_API_KEY`,
    appearing as a server named `env`)
 4. the configured `default`
 5. the only configured server
@@ -259,12 +259,15 @@ Which server a command acts on, most explicit first:
 | Variable | Purpose |
 |----------|---------|
 | `BWG_VEID` | VPS ID, no config file needed |
-| `BWG_KIWIVM_API_KEY` | API key; also accepts `veid:api_key` combined |
+| `BWG_API_KEY` | API key; also accepts `veid:api_key` combined |
 | `BWG_READ_ONLY` | force read-only; nothing can turn it back off |
 | `BWG_SERVER` | which configured server to use |
 | `BWG_CONFIG` | config file location |
 | `BWG_COLOR` | `always` / `never` (also honours `NO_COLOR`) |
 | `BWG_STATUS_FEED` | override the status-page feed (mirror or proxy) |
+
+v0.1.0 spelled the key `BWG_KIWIVM_API_KEY`. That still works and warns
+once per run; it will be removed at v1.0.
 
 ## Updating
 

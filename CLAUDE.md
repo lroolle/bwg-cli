@@ -86,6 +86,9 @@ internal/
 pkg/output/             Table, JSON, jq, colour, humane byte/duration
                         formatting. Colour is severity, never
                         decoration; it never appears in a pipe.
+                        Section() prints a heading only when something
+                        survives under it, and Count() means no message
+                        ever has to write "key(s)".
 
 skills/bwg-cli/SKILL.md The operational contract for agents. When
                         command surface or JSON shapes change, this
@@ -122,7 +125,9 @@ behavior, a scar in TASTE.md, a where-to-look line here.
 - `kiwivm/types.go` — the PHP wire quirks, one comment per absorber
 - `internal/cli/confirm.go` — the consent tiers and the `catastrophic`
   set (typed server name vs y/N) and why it must stay small
-- `internal/config/config.go` — the JSON-masks / YAML-keeps split
+- `internal/config/config.go` — the JSON-masks / YAML-keeps split, and
+  the env-var block: one name per thing, with `BWG_KIWIVM_API_KEY`
+  accepted-but-warned until v1.0
 - `internal/mcp/mcp.go:tools` — why read-only hides rather than refuses
 
 ## Testing
@@ -139,6 +144,8 @@ than case by case:
 - `internal/cli/commands_test.go` drives every command against a full
   fixture set (breadth: catches panics and malformed payloads) and
   asserts read-only blocks every write command.
+- `internal/mcp/mcp_test.go` does the same for every MCP tool: the
+  run closures are a second execution path and nothing else calls them.
 - `internal/cli/confirm_test.go` covers the consent tiers.
 
 ## Release
