@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"time"
 
 	"github.com/lroolle/bwg-cli/kiwivm"
 	"github.com/lroolle/bwg-cli/pkg/output"
@@ -37,6 +36,11 @@ Samples are aggregated per calendar day, which is the granularity that
 answers "when did the traffic spike". Use --raw for the individual
 samples.
 
+KiwiVM keeps roughly two years of samples. The default window is the
+last 30 days, which is the billing cycle the quota below is measured
+against; --days 0 prints everything it kept. The window applies to the
+whole output — table, totals and JSON all describe the same span.
+
 The quota summary at the bottom is the same arithmetic 'bwg info'
 shows: transfer counters with the location multiplier applied.
 
@@ -44,9 +48,11 @@ JSON shape:
   {"server","vmType","days":[{"date","networkIn","networkOut",
    "diskRead","diskWrite","cpuAvg","samples"}],
    "totals":{"networkIn","networkOut","diskRead","diskWrite"},
+   "window":{"days","available"},
    "bandwidth":{...},"samples":[...] (only with --raw)}`,
 		Example: `  bwg usage
   bwg usage --days 7
+  bwg usage --days 0                    # everything KiwiVM kept
   bwg usage --json --jq '.totals.networkOut'`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,24 +71,26 @@ JSON shape:
 			// it; fetching it separately is one extra cheap call.
 			info, infoErr := c.ServiceInfo(ctx)
 
-			byDay := aggregateByDay(stats, days)
-			in, out, dr, dw := stats.Totals()
+			shown, available := window(stats, days)
+			byDay := aggregateByDay(shown)
+			in, out, dr, dw := shown.Totals()
 
 			payload := map[string]any{
 				"server": s.Name, "vmType": stats.VMType, "days": byDay,
 				"totals": map[string]int64{
 					"networkIn": in, "networkOut": out, "diskRead": dr, "diskWrite": dw,
 				},
+				"window": map[string]int{"days": len(byDay), "available": available},
 			}
 			if infoErr == nil {
 				payload["bandwidth"] = info.Bandwidth()
 			}
 			if raw {
-				payload["samples"] = stats.Data
+				payload["samples"] = shown.Data
 			}
 
 			return app.Emit(payload, func(w io.Writer) {
-				renderUsage(w, s.Name, stats, byDay, raw)
+				renderUsage(w, s.Name, shown, byDay, available, raw)
 				if infoErr == nil {
 					b := info.Bandwidth()
 					fmt.Fprintf(w, "\n%s %s %s of %s used, %s free, resets in %s\n",
@@ -95,12 +103,53 @@ JSON shape:
 	}
 
 	cmd.Flags().BoolVar(&raw, "raw", false, "Show individual samples instead of daily totals")
-	cmd.Flags().IntVar(&days, "days", 0, "Only the most recent N days (0 = everything KiwiVM kept)")
+	cmd.Flags().IntVar(&days, "days", defaultUsageDays,
+		"Only the most recent N days (0 = everything KiwiVM kept)")
 	return cmd
 }
 
+// defaultUsageDays is the billing cycle, which is the span the quota
+// line underneath the table is measured over. Printing two years of
+// rows by default put the interesting end of the series off-screen and
+// the summary out of reach.
+const defaultUsageDays = 30
+
+// window trims the series to the most recent n calendar days and
+// reports how many days the full series covered.
+//
+// Everything downstream reads this one slice — the daily table, --raw,
+// the totals line and the JSON payload — so no two parts of the output
+// can end up describing different spans. Before this, --days 7 printed
+// seven rows above a total covering two years.
+func window(stats *kiwivm.UsageStats, days int) (*kiwivm.UsageStats, int) {
+	dates := map[string]bool{}
+	for _, s := range stats.Data {
+		dates[s.Time().Format("2006-01-02")] = true
+	}
+	available := len(dates)
+	if days <= 0 || available <= days {
+		return stats, available
+	}
+
+	keep := make([]string, 0, len(dates))
+	for d := range dates {
+		keep = append(keep, d)
+	}
+	sort.Strings(keep)
+	// ISO dates sort lexically, so the cutoff is a string compare.
+	cutoff := keep[len(keep)-days]
+
+	trimmed := &kiwivm.UsageStats{VMType: stats.VMType}
+	for _, s := range stats.Data {
+		if s.Time().Format("2006-01-02") >= cutoff {
+			trimmed.Data = append(trimmed.Data, s)
+		}
+	}
+	return trimmed, available
+}
+
 // aggregateByDay rolls samples up per calendar day in the local zone.
-func aggregateByDay(stats *kiwivm.UsageStats, limit int) []DayUsage {
+func aggregateByDay(stats *kiwivm.UsageStats) []DayUsage {
 	type acc struct {
 		DayUsage
 		cpuSum int
@@ -131,14 +180,10 @@ func aggregateByDay(stats *kiwivm.UsageStats, limit int) []DayUsage {
 		out = append(out, d)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
-
-	if limit > 0 && len(out) > limit {
-		out = out[len(out)-limit:]
-	}
 	return out
 }
 
-func renderUsage(w io.Writer, server string, stats *kiwivm.UsageStats, days []DayUsage, raw bool) {
+func renderUsage(w io.Writer, server string, stats *kiwivm.UsageStats, days []DayUsage, available int, raw bool) {
 	if len(stats.Data) == 0 {
 		fmt.Fprintf(w, "KiwiVM has no usage samples for %s yet.\n", server)
 		return
@@ -158,43 +203,48 @@ func renderUsage(w io.Writer, server string, stats *kiwivm.UsageStats, days []Da
 			)
 		}
 		t.Render(w)
-		return
-	}
-
-	// Scale the sparkline to the busiest day so the shape is readable
-	// regardless of absolute volume.
-	var peak int64
-	for _, d := range days {
-		if total := d.NetworkIn + d.NetworkOut; total > peak {
-			peak = total
+	} else {
+		// Scale the sparkline to the busiest day so the shape is readable
+		// regardless of absolute volume.
+		var peak int64
+		for _, d := range days {
+			if total := d.NetworkIn + d.NetworkOut; total > peak {
+				peak = total
+			}
 		}
-	}
 
-	t := output.NewTable("DATE", "TRAFFIC", "NET IN", "NET OUT", "DISK R", "DISK W", "CPU").
-		RightAlign(2, 3, 4, 5, 6)
-	for _, d := range days {
-		pct := 0.0
-		if peak > 0 {
-			pct = float64(d.NetworkIn+d.NetworkOut) / float64(peak) * 100
+		t := output.NewTable("DATE", "TRAFFIC", "NET IN", "NET OUT", "DISK R", "DISK W", "CPU").
+			RightAlign(2, 3, 4, 5, 6)
+		for _, d := range days {
+			pct := 0.0
+			if peak > 0 {
+				pct = float64(d.NetworkIn+d.NetworkOut) / float64(peak) * 100
+			}
+			t.Row(
+				d.Date,
+				output.Colorize(bars(pct, 10), output.Blue),
+				output.Bytes(d.NetworkIn),
+				output.Bytes(d.NetworkOut),
+				output.Bytes(d.DiskRead),
+				output.Bytes(d.DiskWrite),
+				fmt.Sprintf("%d%%", d.CPUAvg),
+			)
 		}
-		t.Row(
-			d.Date,
-			output.Colorize(bars(pct, 10), output.Blue),
-			output.Bytes(d.NetworkIn),
-			output.Bytes(d.NetworkOut),
-			output.Bytes(d.DiskRead),
-			output.Bytes(d.DiskWrite),
-			fmt.Sprintf("%d%%", d.CPUAvg),
-		)
+		t.Render(w)
 	}
-	t.Render(w)
 
 	in, out, dr, dw := stats.Totals()
-	start, end := stats.Window()
 	fmt.Fprintf(w, "\n%s %s in, %s out, %s read, %s written over %s\n",
 		output.Dim("Total:"), output.Bytes(in), output.Bytes(out),
-		output.Bytes(dr), output.Bytes(dw),
-		output.Duration(end.Sub(start).Round(time.Hour)))
+		output.Bytes(dr), output.Bytes(dw), output.Count(len(days), "day"))
+
+	// Say what was left out. A table that silently stops at 30 rows
+	// reads like a server with no history before last month.
+	if available > len(days) {
+		fmt.Fprintf(w, "%s\n", output.Dim(fmt.Sprintf(
+			"Showing %d of the %d days KiwiVM kept — for all of it: bwg usage --days 0",
+			len(days), available)))
+	}
 }
 
 // bars renders a plain proportional bar. Unlike output.Bar it carries
