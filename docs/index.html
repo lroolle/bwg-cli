@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bwg — BandwagonHost / KiwiVM fleet control</title>
+<meta name="description" content="One command answers which BandwagonHost box is about to blow its monthly cap. CLI, Go SDK and MCP server, with read-only enforced in the client rather than by a prompt.">
+<link rel="canonical" href="https://lroolle.github.io/bwg-cli/">
+<meta property="og:title" content="bwg — BandwagonHost / KiwiVM fleet control">
+<meta property="og:description" content="Which box is about to blow its monthly cap, and is anything suspended? One table. CLI · Go SDK · MCP server · read-only is a client capability, not a flag.">
+<meta property="og:url" content="https://lroolle.github.io/bwg-cli/">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    --bg: #0d1117; --fg: #d8dee9; --dim: #7d8590; --line: #21262d;
+    --accent: #7ee787; --warn: #e3b341; --bad: #f85149; --card: #12181f;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff; --fg: #1f2328; --dim: #656d76; --line: #d8dee4;
+      --accent: #1a7f37; --warn: #9a6700; --bad: #cf222e; --card: #f6f8fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1.25rem 4rem; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1 { font-size: 2.6rem; margin: 0; letter-spacing: -.02em; font-weight: 700; }
+  h2 { font-size: 1.05rem; margin: 2.75rem 0 .75rem; font-weight: 600; letter-spacing: .01em; }
+  h2::before { content: "# "; color: var(--dim); }
+  p { margin: .75rem 0; }
+  a { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--dim); }
+  a:hover { text-decoration-color: var(--accent); }
+  .tag { color: var(--fg); margin: .6rem 0 .2rem; font-size: 1.1rem; }
+  .value { color: var(--dim); font-size: .95rem; margin: 0 0 1.5rem; }
+  pre {
+    background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1rem; overflow-x: auto; margin: 0;
+    font: 13px/1.55 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .cap { color: var(--dim); font-size: .82rem; margin: .5rem 0 0; }
+  ul { padding-left: 1.1rem; margin: .75rem 0; }
+  li { margin: .45rem 0; }
+  b { font-weight: 600; }
+  .ok { color: var(--accent); } .wa { color: var(--warn); } .bd { color: var(--bad); }
+  .dim { color: var(--dim); }
+  nav { margin: 1.25rem 0 0; font-size: .9rem; color: var(--dim); }
+  nav a { margin-right: 1rem; white-space: nowrap; }
+  footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); color: var(--dim); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>bwg</h1>
+  <p class="tag">BandwagonHost / KiwiVM fleet control for humans and AI agents.</p>
+  <p class="value">CLI · Go SDK · MCP server · read-only enforced in the client, not by a prompt · MIT</p>
+
+<pre><span class="dim">$</span> bwg ls
+<span class="dim">SERVER  HOSTNAME           PLAN      LOCATION         BANDWIDTH   USED  RESETS  STATE</span>
+osaka   osaka.example.com  speed-2g  JP, Osaka        <span class="bd">█████████░</span>   <span class="bd">94%</span>  6d 3h   <span class="wa">attention</span>
+tokyo   tokyo.example.com  micro128  JP, Tokyo        <span class="ok">█████░░░░░</span>   47%  6d 3h   <span class="ok">ok</span>
+la      la.example.com     kvm-2g    US, Los Angeles  <span class="ok">██░░░░░░░░</span>   19%  6d 3h   <span class="ok">ok</span>
+
+<span class="dim">Total:</span> 1.8 TiB of 3.9 TiB across 3 servers (45%)
+
+<span class="bd">!</span> osaka: bandwidth at 94%</pre>
+  <p class="cap">Real output, pinned by a test so it cannot drift from what the tool prints.
+  KiwiVM shows you one VPS per page; this is the whole account in one sweep.</p>
+
+  <nav>
+    <a href="https://github.com/lroolle/bwg-cli">GitHub</a>
+    <a href="https://github.com/lroolle/bwg-cli/releases/latest">Releases</a>
+    <a href="https://github.com/lroolle/bwg-cli#readme">Docs</a>
+    <a href="llms.txt">llms.txt</a>
+    <a href="https://pkg.go.dev/github.com/lroolle/bwg-cli/kiwivm">Go SDK</a>
+  </nav>
+
+  <h2>Install</h2>
+<pre>curl -fsSL https://raw.githubusercontent.com/lroolle/bwg-cli/main/install.sh | bash
+
+<span class="dim"># or</span>
+go install github.com/lroolle/bwg-cli/cmd/bwg@latest</pre>
+
+  <h2>60 seconds</h2>
+  <p>Two values per VPS, both from the KiwiVM panel: the <b>VEID</b> in the panel
+  URL after <code>?veid=</code>, and the <b>API key</b> under the API tab.</p>
+<pre>export BWG_VEID=1347645
+export BWG_API_KEY=private_xxxxxxxx
+
+bwg ls          <span class="dim"># the fleet</span>
+bwg info        <span class="dim"># plan, addresses, quota</span>
+bwg ssh         <span class="dim"># ssh in, port resolved from the API</span></pre>
+  <p>A fleet lives in <code>~/.config/bwg/config.yaml</code> (mode 0600):
+  <code>bwg server add</code>, or <code>bwg server import keys.csv</code> from the
+  billing portal's export, then <code>bwg server check</code> to verify every pair.</p>
+
+  <h2>Why it exists</h2>
+  <ul>
+    <li><b>KiwiVM authenticates per VPS</b> — there is no account-level endpoint, so
+      every fleet-wide question is N calls with N credential pairs. bwg sweeps them
+      concurrently and prints one table.</li>
+    <li><b>A KiwiVM API key can reinstall your server.</b> Handing that to an agent
+      needs a real answer, not a prompt.</li>
+  </ul>
+
+  <h2>Read-only is a capability, not a flag</h2>
+<pre>c := kiwivm.New(veid, key, kiwivm.ReadOnly())
+c.Restart(ctx)     <span class="dim">// *ReadOnlyError — no HTTP request is made</span>
+c.ServiceInfo(ctx) <span class="dim">// fine</span></pre>
+  <p>Every endpoint is classified in one registry — 45 endpoints, 29 of them
+  mutating — and the gate sits in the SDK in front of the HTTP client. The CLI,
+  the MCP server and any Go program importing the package inherit it. A test
+  reflects over every client method and asserts a read-only client refuses all 29
+  <em>without touching the network</em>, so a method added later is covered
+  automatically.</p>
+<pre>bwg --read-only ls    <span class="dim"># or: export BWG_READ_ONLY=1</span>
+bwg api ops           <span class="dim"># how every endpoint is classified</span></pre>
+
+  <h2>For agents</h2>
+  <p>Every command speaks <code>--json</code> and <code>--jq</code>. Data on stdout,
+  diagnostics on stderr. Exit codes carry the reason: <code>2</code> configuration,
+  <code>3</code> refused, <code>4</code> credentials rejected. Errors name the
+  command that fixes them.</p>
+<pre>claude mcp add bwg -- bwg mcp --read-only</pre>
+  <p>In read-only mode the mutating MCP tools are <b>not advertised at all</b> — an
+  agent is never offered a tool that is certain to be refused. MCP has no
+  confirmation channel, so serve read-only unless the host has an approval layer
+  you trust.</p>
+
+  <h2>When to skip it</h2>
+  <ul>
+    <li>One VPS you already keep open in the panel — the panel is fine.</li>
+    <li>Billing, renewals or buying capacity: KiwiVM's API has no billing
+      endpoints, so neither does bwg.</li>
+    <li>Anything inside the guest beyond a shell command — that is ssh's job, and
+      <code>bwg ssh</code> hands you straight to it.</li>
+  </ul>
+
+  <footer>
+    MIT licensed. Unofficial: uses BandwagonHost's public KiwiVM REST API, not
+    affiliated with BandwagonHost or 64clouds.
+    <br>
+    <a href="https://github.com/lroolle/bwg-cli/blob/main/SECURITY.md">Where your keys are stored</a> ·
+    <a href="https://github.com/lroolle/bwg-cli/issues">Issues</a>
+  </footer>
+
+</main>
+</body>
+</html>
