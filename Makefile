@@ -52,6 +52,13 @@ cross:
 	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)_macOS_arm64    ./cmd/bwg
 	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)_windows_x86_64.exe ./cmd/bwg
 
+# The project page serves llms.txt at its root, so agents can fetch one
+# URL. It is a copy of the repo's; CI fails if the two drift.
+.PHONY: docs
+docs:
+	@cp llms.txt docs/llms.txt
+	@echo "docs/llms.txt synced"
+
 .PHONY: completions
 completions: build
 	@mkdir -p completions

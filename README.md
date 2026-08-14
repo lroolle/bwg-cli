@@ -1,6 +1,29 @@
-# bwg-cli
+<div align="center">
+
+# bwg
 
 **BandwagonHost / KiwiVM fleet control for humans and AI agents.**
+
+<p><strong>One table for the whole account · CLI · Go SDK · MCP server · read-only enforced in the client, not by a prompt</strong></p>
+
+[![ci](https://github.com/lroolle/bwg-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/lroolle/bwg-cli/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/lroolle/bwg-cli?label=release)](https://github.com/lroolle/bwg-cli/releases/latest)
+[![go reference](https://pkg.go.dev/badge/github.com/lroolle/bwg-cli/kiwivm.svg)](https://pkg.go.dev/github.com/lroolle/bwg-cli/kiwivm)
+[![license](https://img.shields.io/github/license/lroolle/bwg-cli?color=blue)](LICENSE)
+
+[Page](https://lroolle.github.io/bwg-cli/) ·
+[Install](#install) ·
+[Quick start](#quick-start) ·
+[Proof](#proof) ·
+[Agents](#built-for-agents) ·
+[llms.txt](llms.txt) ·
+[Changelog](CHANGELOG.md)
+
+<sub>AI agents / LLMs: read <a href="llms.txt">/llms.txt</a> for the short version, or
+<a href="skills/bwg-cli/SKILL.md">skills/bwg-cli/SKILL.md</a> for the operational contract —
+command tree, JSON shapes, exit codes.</sub>
+
+</div>
 
 ```
 $ bwg ls
@@ -65,6 +88,45 @@ snapshot is *destructive* because nothing brings it back. Keeping the
 destructive set small is what makes a destructive confirmation mean
 something — every destructive entry has to state what is lost, and a
 test enforces that.
+
+## Proof
+
+The safety model is the product, so it is tested structurally rather
+than case by case. Every claim above has a command that checks it:
+
+| Claim | How it is enforced | Reproduce |
+|-------|--------------------|-----------|
+| A read-only client cannot mutate | A test reflects over every client method, discovers which endpoint it calls, and asserts refusal **with no network access**. Methods added later are covered without anyone remembering. | `go test ./kiwivm -run ReadOnly -v` |
+| The destructive tier stays meaningful | Every destructive entry must state what it loses, and the tier must stay a minority — 14 of 45 endpoints today. Both are assertions, not conventions. | `go test ./kiwivm -run 'Ops\|Destructive' -v` |
+| No command panics on real payloads | Every CLI command and all 15 MCP tools run against a full fixture set, human and `--json`. | `go test ./internal/... ` |
+| `--json` never carries an API key | Enforced by the type: `Server` marshals through a redacting shape, so a new field cannot leak by accident. | `go test ./internal/config -run JSON -v` |
+| The `bwg ls` output above is real | Pinned by [`render_test.go`](internal/cli/render_test.go), so the README cannot drift from the tool. | `go test ./internal/cli -run Rendering -v` |
+
+84.5% statement coverage (`go test ./... -cover`); CI runs gofmt, `go
+vet` and `-race` tests on Linux, macOS and Windows, with the safety
+tests as a separate job so a gate regression fails on its own line.
+
+```bash
+make check     # everything CI runs, locally
+```
+
+## When to use it, when to skip it
+
+Use it if you have more than one BandwagonHost box, or one box and an
+agent you would rather not hand a reinstall-capable key to.
+
+Skip it if:
+
+- **You have one VPS and the panel is already open.** One page, no
+  install. bwg earns its place at N > 1, or when you want the fleet in
+  JSON.
+- **You need billing, renewals or new capacity.** KiwiVM's API has no
+  billing endpoints, so neither does bwg. That stays in the portal.
+- **Your VPS is not BandwagonHost/64clouds.** This speaks KiwiVM and
+  nothing else.
+- **You want a dashboard.** This is a terminal tool that prints tables
+  and JSON; `bwg ls --json` into your own dashboard is the intended
+  seam.
 
 ## Install
 
@@ -298,7 +360,8 @@ make cover
 ## Acknowledgments
 
 - [strahe/bwh](https://github.com/strahe/bwh) — the prior Go client for
-  this API, and the source of several hard-won wire-format details.
+  this API, and the source of several hard-won wire-format details. If
+  you want a library and none of the CLI, it is a good one.
 - [dhslegen/bandwagon-dashboard](https://github.com/dhslegen/bandwagon-dashboard)
   — a copy of the KiwiVM REST API documentation.
 - [gh](https://github.com/cli/cli) — the model for what a CLI should be.
@@ -308,4 +371,6 @@ make cover
 Unofficial. Uses BandwagonHost's public KiwiVM REST API; not affiliated
 with BandwagonHost or 64clouds.
 
-MIT licensed. See [SECURITY.md](SECURITY.md) for what is stored where.
+MIT licensed. [Project page](https://lroolle.github.io/bwg-cli/) ·
+[CHANGELOG](CHANGELOG.md) · [SECURITY.md](SECURITY.md) for what is
+stored where.

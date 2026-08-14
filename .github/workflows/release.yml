@@ -20,7 +20,37 @@ jobs:
           cache: true
       - uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
+          # Not "latest": a release build that changes under you is an
+          # outage on a timer, and the archive names below are an
+          # interface `bwg update` depends on.
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The tripwire. install.sh and `bwg update` fetch release assets by
+      # exact name, so a change to .goreleaser.yaml's name_template would
+      # break every existing installation's self-update while the release
+      # job stayed green. These names are pinned on the Go side by
+      # TestAssetName in internal/updater; if you change one, change both.
+      - name: Verify the release carries what bwg update asks for
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --json assets --jq '.assets[].name' | sort > actual.txt
+          cat > expected.txt <<'NAMES'
+          bwg_linux_arm64.tar.gz
+          bwg_linux_x86_64.tar.gz
+          bwg_macOS_arm64.tar.gz
+          bwg_macOS_x86_64.tar.gz
+          bwg_windows_arm64.zip
+          bwg_windows_x86_64.zip
+          checksums.txt
+          NAMES
+          sort -o expected.txt expected.txt
+          if ! diff -u expected.txt actual.txt; then
+            echo "::error::release $TAG does not carry the assets bwg update expects"
+            exit 1
+          fi
+          echo "$TAG carries all $(wc -l < expected.txt) expected assets"

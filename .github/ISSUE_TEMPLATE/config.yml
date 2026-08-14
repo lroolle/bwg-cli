@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/lroolle/bwg-cli/blob/main/SECURITY.md
+    about: Do not open a public issue for anything involving credentials — see SECURITY.md.
+  - name: KiwiVM API question
+    url: https://kiwivm.64clouds.com/
+    about: bwg only exposes what BandwagonHost's API offers; account and billing questions belong to their support.

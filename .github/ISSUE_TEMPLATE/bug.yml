@@ -1,0 +1,52 @@
+name: Bug report
+description: Something bwg did that it should not have
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste an API key. `--json` output masks keys for you;
+        `--verbose` logs request parameters, so check before pasting.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran and what it printed. Exact output beats a description.
+      placeholder: |
+        $ bwg usage --days 7
+        ...
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `bwg version`
+      placeholder: bwg v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS and architecture
+      placeholder: macOS 15 arm64 / Ubuntu 24.04 x86_64 / Windows 11
+    validations:
+      required: true
+
+  - type: input
+    id: vmtype
+    attributes:
+      label: VPS type, if relevant
+      description: KVM or OpenVZ — they return different fields, and half of the bugs live there.
+      placeholder: KVM

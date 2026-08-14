@@ -34,6 +34,20 @@ jobs:
       - run: go test -race ./...
       - run: go build ./...
 
+  # The agent-facing copy on the project page is served from docs/, so
+  # it can drift from the one agents fetch from the repo. Two files,
+  # one source of truth, checked rather than remembered.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: llms.txt is in sync with the published copy
+        run: |
+          if ! diff -u llms.txt docs/llms.txt; then
+            echo "::error::docs/llms.txt is stale — run: make docs"
+            exit 1
+          fi
+
   # The safety model is the product. If the read-only gate regresses,
   # the build fails loudly rather than quietly shipping.
   safety:
