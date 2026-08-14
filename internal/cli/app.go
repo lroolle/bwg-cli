@@ -88,6 +88,14 @@ func (a *App) Init() error {
 		a.ReadOnly = true
 	}
 
+	// One line, on stderr, once per run: enough to get the variable
+	// renamed, cheap enough not to be worth silencing. It goes away
+	// with the variable at v1.0.
+	if config.LegacyAPIKeyEnv() {
+		a.Notef("%s %s is deprecated — rename it to %s (it still works for now)",
+			output.Warn("!"), config.EnvAPIKeyLegacy, config.EnvAPIKey)
+	}
+
 	cfg, err := config.Load(a.ConfigPath)
 	if err != nil {
 		return err
@@ -115,7 +123,7 @@ func (a *App) Server() (*config.Server, error) {
 				"  bwg needs two values per VPS, both from the KiwiVM control panel:\n" +
 				"    VEID    the VPS ID number (in the panel URL after ?veid=)\n" +
 				"    API key under the API tab (looks like private_xxxxxxxx)\n\n" +
-				"  Quickest:   export BWG_VEID=<id> BWG_KIWIVM_API_KEY=<key>\n" +
+				"  Quickest:   export BWG_VEID=<id> BWG_API_KEY=<key>\n" +
 				"  Named:      bwg server add <name> --veid <id> --key <api-key>\n" +
 				"  Bulk:       bwg server import keys.csv")}
 	case errors.Is(err, config.ErrAmbiguous):

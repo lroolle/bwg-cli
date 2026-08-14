@@ -88,5 +88,5 @@ esac
 
 echo
 echo "Next:"
-echo "  export BWG_VEID=<id> BWG_KIWIVM_API_KEY=<key>   # from KiwiVM > API"
+echo "  export BWG_VEID=<id> BWG_API_KEY=<key>   # from KiwiVM > API"
 echo "  bwg ls"

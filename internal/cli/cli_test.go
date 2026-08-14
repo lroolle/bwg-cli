@@ -673,3 +673,95 @@ func TestCommandsDocumentThemselves(t *testing.T) {
 	}
 	walk(h.cmd)
 }
+
+// -- credentials from the environment ----------------------------------
+
+// The deprecated spelling has to keep working, say so once, and say it
+// on stderr — a warning that lands in a --json pipe is a bug, not a
+// courtesy.
+func TestLegacyAPIKeyEnvWarnsOnStderrAndStillWorks(t *testing.T) {
+	h := newHarness(t, nil)
+	t.Setenv("BWG_VEID", "1347645")
+	t.Setenv("BWG_KIWIVM_API_KEY", "private_abcdefghijklmnopqrstuv")
+
+	// server ls touches no API, so this exercises the warning alone.
+	if err := h.run("server", "ls", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.stderr.String(), "BWG_KIWIVM_API_KEY is deprecated") {
+		t.Errorf("no deprecation warning on stderr: %q", h.stderr)
+	}
+	if !strings.Contains(h.stderr.String(), "BWG_API_KEY") {
+		t.Errorf("the warning does not name the replacement: %q", h.stderr)
+	}
+	if strings.Contains(h.stdout.String(), "deprecated") {
+		t.Errorf("the warning contaminated stdout: %q", h.stdout)
+	}
+	// And the credentials still resolve, or the warning would be the
+	// least of it.
+	if !strings.Contains(h.stdout.String(), `"fromEnv": true`) {
+		t.Errorf("the legacy variable stopped producing the env server: %s", h.stdout)
+	}
+	if n := strings.Count(h.stderr.String(), "is deprecated"); n != 1 {
+		t.Errorf("the warning fired %d times in one run", n)
+	}
+}
+
+func TestCurrentAPIKeyEnvDoesNotWarn(t *testing.T) {
+	h := newHarness(t, nil)
+	t.Setenv("BWG_VEID", "1347645")
+	t.Setenv("BWG_API_KEY", "private_abcdefghijklmnopqrstuv")
+
+	if err := h.run("server", "ls"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(h.stderr.String(), "deprecated") {
+		t.Errorf("the current spelling warned anyway: %q", h.stderr)
+	}
+}
+
+// `bwg server show env` has to name the variable actually in play, not
+// whichever spelling the docs prefer this month.
+func TestServerShowNamesTheVariableInUse(t *testing.T) {
+	h := newHarness(t, nil)
+	t.Setenv("BWG_VEID", "1347645")
+	t.Setenv("BWG_KIWIVM_API_KEY", "private_abcdefghijklmnopqrstuv")
+
+	if err := h.run("server", "show", "env"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.stdout.String(), "BWG_KIWIVM_API_KEY") {
+		t.Errorf("source line does not name the legacy variable:\n%s", h.stdout)
+	}
+
+	t.Setenv("BWG_API_KEY", "private_abcdefghijklmnopqrstuv")
+	if err := h.run("server", "show", "env"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.stdout.String(), "BWG_API_KEY") ||
+		strings.Contains(h.stdout.String(), "BWG_KIWIVM_API_KEY") {
+		t.Errorf("source line does not follow the variable in use:\n%s", h.stdout)
+	}
+}
+
+// The first-run message is the only thing between a new user and
+// giving up, so it must name the variables that exist today.
+func TestFirstRunMessageNamesCurrentVariables(t *testing.T) {
+	h := newHarness(t, nil)
+	empty := filepath.Join(t.TempDir(), "none.yaml")
+	t.Setenv("BWG_CONFIG", empty)
+
+	err := h.run("info")
+	if err == nil {
+		t.Fatal("info with no fleet succeeded")
+	}
+	if CodeFor(err) != ExitConfig {
+		t.Errorf("exit code = %d, want %d", CodeFor(err), ExitConfig)
+	}
+	if !strings.Contains(err.Error(), "BWG_API_KEY") {
+		t.Errorf("the first-run help does not name BWG_API_KEY:\n%v", err)
+	}
+	if strings.Contains(err.Error(), "BWG_KIWIVM_API_KEY") {
+		t.Errorf("the first-run help still teaches the deprecated name:\n%v", err)
+	}
+}

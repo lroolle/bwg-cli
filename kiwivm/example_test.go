@@ -13,7 +13,7 @@ import (
 // The common case: read the fleet-relevant numbers off one VPS
 // without any possibility of changing it.
 func Example_readOnly() {
-	c := kiwivm.New(os.Getenv("BWG_VEID"), os.Getenv("BWG_KIWIVM_API_KEY"),
+	c := kiwivm.New(os.Getenv("BWG_VEID"), os.Getenv("BWG_API_KEY"),
 		kiwivm.ReadOnly())
 
 	// A mutation is refused before any HTTP request happens.
