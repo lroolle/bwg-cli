@@ -27,7 +27,7 @@ from that VPS's KiwiVM > API page. The config lives at
 For a single box, or for CI, no config is needed at all:
 
   export BWG_VEID=1347645
-  export BWG_KIWIVM_API_KEY=private_...
+  export BWG_API_KEY=private_...
 
 Those credentials appear as a server named "env" and take precedence
 over the stored default.`,
@@ -351,7 +351,7 @@ func sshPortNote(port int) string {
 
 func sourceNote(s *config.Server, cfg *config.Config) string {
 	if s.FromEnv {
-		return "environment (" + config.EnvVEID + ", " + config.EnvAPIKeyAlt + ")"
+		return "environment (" + config.EnvVEID + ", " + config.APIKeyEnvVar() + ")"
 	}
 	return cfg.Path()
 }
@@ -451,8 +451,8 @@ Use - to read the CSV from stdin.`,
 						t.Row(r.Name, r.VEID, output.Dim(r.Status))
 					}
 					t.Render(w)
-					fmt.Fprintf(w, "\n%s %d server(s), %d skipped.\n",
-						verb, len(added), len(skipped))
+					fmt.Fprintf(w, "\n%s %s, %d skipped.\n",
+						verb, output.Count(len(added), "server"), len(skipped))
 					if !dryRun && len(added) > 0 {
 						fmt.Fprintf(w, "%s\n", output.Dim("See them all: bwg ls"))
 					}
@@ -534,7 +534,7 @@ JSON shape: {"results":[{"server","veid","ok","hostname","error"}],
 			}
 			if failCount > 0 {
 				return &ExitCodeError{Code: ExitAuth,
-					Err: fmt.Errorf("%d of %d servers did not authenticate", failCount, len(checks))}
+					Err: fmt.Errorf("%d of %s did not authenticate", failCount, output.Count(len(checks), "server"))}
 			}
 			return nil
 		},

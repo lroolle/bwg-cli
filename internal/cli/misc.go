@@ -573,7 +573,7 @@ JSON shape: {"server","remaining15min","remaining24h"}`,
 }
 
 func budgetCell(points int) string {
-	s := fmt.Sprintf("%d points", points)
+	s := output.Count(points, "point")
 	switch {
 	case points <= 0:
 		return output.Bad(s + " — requests are being dropped")
@@ -835,7 +835,7 @@ something did not take.`,
 				map[string]any{"server": s.Name, "submitted": res.Submitted,
 					"updated": res.Updated, "ignored": ignored},
 				func(w io.Writer) {
-					fmt.Fprintf(w, "%s %d preference(s) updated.\n", output.Good("✓"), len(res.Updated))
+					fmt.Fprintf(w, "%s %s updated.\n", output.Good("✓"), output.Count(len(res.Updated), "preference"))
 					if len(ignored) > 0 {
 						fmt.Fprintf(w, "%s KiwiVM ignored: %s\n  %s\n",
 							output.Warn("!"), strings.Join(ignored, ", "),
@@ -1001,7 +1001,10 @@ func readScript(app *App, args []string, file string) (string, error) {
 		return args[0], nil
 	}
 
-	if output.IsTerminal(os.Stdin) {
+	// Check the stream that is actually about to be read, not os.Stdin:
+	// they are the same file in production, and only the former is
+	// true in a test or when a caller supplies its own input.
+	if f, ok := app.In.(*os.File); ok && output.IsTerminal(f) {
 		return "", fmt.Errorf("no script given\n\n" +
 			"  bwg run 'apt-get update'\n" +
 			"  bwg run --file ./bootstrap.sh\n" +

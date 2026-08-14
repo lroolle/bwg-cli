@@ -223,9 +223,9 @@ func effectiveNote(effective string, n int) string {
 	switch effective {
 	case "per-VM":
 		return fmt.Sprintf("%s %s", output.Good("per-VM"),
-			output.Dim(fmt.Sprintf("(%d keys; account keys are shadowed)", n)))
+			output.Dim("("+output.Count(n, "key")+"; account keys are shadowed)"))
 	case "account":
-		return fmt.Sprintf("%s %s", output.Good("account"), output.Dim(fmt.Sprintf("(%d keys)", n)))
+		return fmt.Sprintf("%s %s", output.Good("account"), output.Dim("("+output.Count(n, "key")+")"))
 	}
 	return output.Warn("none — a reinstall would leave password-only access")
 }
@@ -331,8 +331,8 @@ running guest's authorized_keys.`,
 							output.Good("✓"), output.Strong(s.Name))
 						return
 					}
-					fmt.Fprintf(w, "%s %d key(s) stored for %s — they install on the next reinstall.\n",
-						output.Good("✓"), len(keys), output.Strong(s.Name))
+					fmt.Fprintf(w, "%s %s stored for %s — they install on the next reinstall.\n",
+						output.Good("✓"), output.Count(len(keys), "key"), output.Strong(s.Name))
 				})
 		},
 	}

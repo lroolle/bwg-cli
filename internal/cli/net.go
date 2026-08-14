@@ -218,7 +218,7 @@ func netIPv6(app *App) *cobra.Command {
 
 			if err := app.Confirm(Consent{
 				Op: kiwivm.Ops["ipv6/add"], Server: s,
-				Facts: [][2]string{{"Currently", fmt.Sprintf("%d of %d subnets", have, max)}},
+				Facts: [][2]string{{"Currently", fmt.Sprintf("%d of %s", have, output.Count(max, "subnet"))}},
 			}); err != nil {
 				return err
 			}

@@ -273,8 +273,8 @@ func renderFleet(w io.Writer, rep FleetReport, alerting bool) {
 		// Under --alerting an empty result is the good outcome, not a
 		// filter that found nothing. Say which it is.
 		if alerting {
-			fmt.Fprintf(w, "%s Nothing needs attention across %d server(s).\n",
-				output.Good("✓"), rep.Totals.Reachable)
+			fmt.Fprintf(w, "%s Nothing needs attention across %s.\n",
+				output.Good("✓"), output.Count(rep.Totals.Reachable, "server"))
 			return
 		}
 		fmt.Fprintln(w, "No servers matched.")
@@ -298,11 +298,11 @@ func renderFleet(w io.Writer, rep FleetReport, alerting bool) {
 	t.Render(w)
 
 	if len(rep.Servers) > 1 {
-		fmt.Fprintf(w, "\n%s %s of %s across %d servers (%s)\n",
+		fmt.Fprintf(w, "\n%s %s of %s across %s (%s)\n",
 			output.Dim("Total:"),
 			output.Bytes(rep.Totals.BandwidthUsed),
 			output.Bytes(rep.Totals.BandwidthTotal),
-			rep.Totals.Reachable,
+			output.Count(rep.Totals.Reachable, "server"),
 			output.Usage(rep.Totals.Percent))
 	}
 
