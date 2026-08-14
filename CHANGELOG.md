@@ -8,6 +8,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.1] - 2026-08-14
+
 ### Fixed
 
 - **`install.sh` failed behind a shared IP.** It resolved the latest tag
@@ -92,6 +96,7 @@ First release.
 - `bwg incidents` correlates BandwagonHost's status page against your
   fleet and prints why each match was made.
 
-[Unreleased]: https://github.com/lroolle/bwg-cli/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lroolle/bwg-cli/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/lroolle/bwg-cli/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lroolle/bwg-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lroolle/bwg-cli/releases/tag/v0.1.0
