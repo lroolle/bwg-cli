@@ -127,19 +127,69 @@ func Download(ctx context.Context, rel *Release) (string, error) {
 	return extractTarGz(resp.Body)
 }
 
-// Replace atomically swaps the running binary at binaryPath with the
-// new one at newPath. The old binary is kept as binaryPath + ".old".
+// Replace swaps the running binary at binaryPath with the new one at
+// newPath. The old binary is kept as binaryPath + ".old".
+//
+// The move-aside dance is not decoration: a running executable cannot
+// be written to (ETXTBSY on Linux), so the live inode is renamed out of
+// the way and the new binary takes its name.
+//
+// The rename of the *downloaded* file can fail even when everything is
+// healthy: Download writes to $TMPDIR, which is a separate filesystem
+// from $HOME on most Linux systems, and rename cannot cross that
+// boundary. So a failed rename falls back to a copy rather than being
+// reported as a broken update. Whatever happens, the old binary goes
+// back if the install does not complete.
 func Replace(binaryPath, newPath string) error {
 	backup := binaryPath + ".old"
 	if err := os.Rename(binaryPath, backup); err != nil {
 		return fmt.Errorf("updater: backup current binary: %w", err)
 	}
 	if err := os.Rename(newPath, binaryPath); err != nil {
-		// Try to restore the backup.
-		os.Rename(backup, binaryPath)
-		return fmt.Errorf("updater: install new binary: %w", err)
+		if cerr := installCopy(newPath, binaryPath); cerr != nil {
+			os.Rename(backup, binaryPath)
+			return fmt.Errorf("updater: install new binary: %w", cerr)
+		}
 	}
 	return nil
+}
+
+// installCopy writes src to dst as an executable, for the case where
+// rename cannot. dst must not exist as the running binary — Replace
+// has already moved that aside — or the copy hits ETXTBSY.
+func installCopy(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	mode := os.FileMode(0o755)
+	if info, err := in.Stat(); err == nil {
+		mode = info.Mode() | 0o111
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(dst)
+		return err
+	}
+	// A half-written binary that survives a crash is worse than a
+	// failed update, so the bytes are on disk before we claim success.
+	if err := out.Sync(); err != nil {
+		out.Close()
+		os.Remove(dst)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	// O_CREATE honours umask; the binary has to be executable anyway.
+	return os.Chmod(dst, mode)
 }
 
 // AssetName returns the goreleaser archive name for a given GOOS/GOARCH.
