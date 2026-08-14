@@ -20,6 +20,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - **`bwg update` blamed your install for GitHub's rate limit.** A 403
   with `x-ratelimit-remaining: 0` now says what it is and where to get
   the binary meanwhile, instead of "GitHub API returned 403".
+- **`bwg version` reported `dev` after `go install`**, which is not
+  cosmetic: the updater compares versions numerically, `dev` parses as
+  0.0.0, and every `bwg update --check` announced an update that was
+  already installed. It now falls back to the module version Go records
+  in the binary.
 
 ## [0.2.0] - 2026-08-14
 
